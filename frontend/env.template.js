@@ -1,0 +1,5 @@
+window.__env = {
+  AUTH_API_URL: "${AUTH_API_URL}",
+  LAUNDRY_API_URL: "${LAUNDRY_API_URL}",
+  ORDER_API_URL: "${ORDER_API_URL}"
+};
