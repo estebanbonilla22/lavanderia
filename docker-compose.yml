@@ -1,21 +1,4 @@
 services:
-  mysql:
-    image: mysql:8.0
-    container_name: lavanderia-mysql
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpw}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-lavanderia_auth}
-    ports:
-      - "3307:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-rootpw}"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
   postgres:
     image: postgres:16-alpine
     container_name: lavanderia-postgres
@@ -23,12 +6,11 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: lavanderia_laundry
+      POSTGRES_DB: ${POSTGRES_DB:-lavanderia}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./infra/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
@@ -40,13 +22,13 @@ services:
     container_name: lavanderia-auth-service
     restart: unless-stopped
     depends_on:
-      mysql:
+      postgres:
         condition: service_healthy
     environment:
       PORT: 8081
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-lavanderia_auth}?useSSL=false&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true&serverTimezone=UTC
-      SPRING_DATASOURCE_USERNAME: root
-      SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpw}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-lavanderia}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       JPA_DDL_AUTO: update
       JWT_SECRET: ${JWT_SECRET:-cambia-este-secreto-super-seguro-para-jwt-1234567890}
       JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
@@ -67,7 +49,7 @@ services:
         condition: service_healthy
     environment:
       PORT: 8082
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/lavanderia_laundry
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-lavanderia}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       JPA_DDL_AUTO: update
@@ -87,7 +69,7 @@ services:
         condition: service_started
     environment:
       PORT: 8083
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/lavanderia_orders
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-lavanderia}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       JPA_DDL_AUTO: update
@@ -113,5 +95,4 @@ services:
       - "4200:80"
 
 volumes:
-  mysql_data:
   postgres_data:

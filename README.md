@@ -20,7 +20,7 @@ Sistema completo para gestión de un negocio de lavandería:
 |-----------------|------------------------------------------------------------------|
 | Backend         | Java 17, Spring Boot 3.2, Spring Security, Spring Data JPA       |
 | Tokens          | JJWT 0.12 (HMAC-SHA256, secreto compartido entre microservicios) |
-| Base de datos   | MySQL 8 (auth) y PostgreSQL 16 (servicios y órdenes)             |
+| Base de datos   | PostgreSQL 16 (un solo servidor; BD `lavanderia` para los 3 microservicios) |
 | Inter-servicios | WebClient (HTTP entre order-service y laundry-service)           |
 | Frontend        | Angular 21 (standalone components + signals)                     |
 | Empaquetado     | Docker multi-stage, nginx para servir el frontend                |
@@ -40,17 +40,20 @@ Sistema completo para gestión de un negocio de lavandería:
                 │ :8081  (JWT)    │ │ :8082      │ │ :8083          │
                 └────────┬────────┘ └─────┬──────┘ └────┬───────┬───┘
                          │                │             │       │
-                         ▼                ▼             ▼       ▼ HTTP
-                   ┌──────────┐     ┌─────────────┐  ┌─────────────┐
-                   │  MySQL   │     │ PostgreSQL  │  │ PostgreSQL  │
-                   │  :3307   │     │   :5432     │  │   :5432     │
-                   └──────────┘     │ (laundry)   │  │  (orders)   │
-                                    └─────────────┘  └─────────────┘
+                         └────────────────┴─────────────┘       │ HTTP
+                                        │                      │
+                                        ▼                      ▼
+                                 ┌─────────────────────────────┐
+                                 │  PostgreSQL 16 (:5432)      │
+                                 │  base: lavanderia           │
+                                 │  tablas: users, laundry_*,  │
+                                 │          orders             │
+                                 └─────────────────────────────┘
 ```
 
 Cada microservicio:
 - es un proyecto Spring Boot independiente con su propio `pom.xml`, `Dockerfile` y `application.yml`,
-- tiene su propio puerto y su propia conexión a base de datos,
+- tiene su propio puerto; los tres comparten la **misma base PostgreSQL** (`lavanderia`) con tablas distintas,
 - valida los JWT de forma stateless usando un **secreto compartido** (`JWT_SECRET`) que también firma `auth-service`.
 
 `order-service` consulta `laundry-service` vía HTTP (WebClient) para obtener precio y datos del servicio al crear una orden.
@@ -58,11 +61,10 @@ Cada microservicio:
 ```
 laundry-platform/
 ├── backend/
-│   ├── auth-service/        # Spring Boot + MySQL + JWT (puerto 8081)
+│   ├── auth-service/        # Spring Boot + PostgreSQL + JWT (puerto 8081)
 │   ├── laundry-service/     # Spring Boot + PostgreSQL    (puerto 8082)
 │   └── order-service/       # Spring Boot + PostgreSQL    (puerto 8083)
 ├── frontend/                # Angular 21 + nginx           (puerto 4200)
-├── infra/postgres-init.sql  # Crea la BD de órdenes en Postgres
 ├── docker-compose.yml
 ├── render.yaml
 ├── .env.example
@@ -88,10 +90,7 @@ Servicios expuestos:
 | auth-service    | http://localhost:8081          |
 | laundry-service | http://localhost:8082          |
 | order-service   | http://localhost:8083          |
-| MySQL           | localhost:3307 (host) / 3306 (red) |
-| PostgreSQL      | localhost:5432                 |
-
-> El puerto del host de MySQL es **3307** para evitar choques con un MySQL local. Dentro de la red de Docker el puerto sigue siendo `3306`.
+| PostgreSQL      | localhost:5432 (BD `lavanderia`) |
 
 Para parar:
 
@@ -105,7 +104,7 @@ docker compose down -v       # borra también los datos
 Cada servicio se construye y corre por separado con Maven:
 
 ```bash
-# Levanta MySQL y PostgreSQL como prefieras (Docker, instalación nativa…)
+# Levanta PostgreSQL (p. ej. docker compose solo con postgres) o usa la tuya local
 
 cd backend/auth-service
 ./mvnw spring-boot:run        # o: mvn spring-boot:run
@@ -229,80 +228,42 @@ La autorización se valida tanto en backend (Spring Security + `@PreAuthorize` y
 
 ## 9. Despliegue en Render
 
-Render permite desplegar este proyecto **directamente desde GitHub** usando el `render.yaml` incluido.
+Render permite desplegar este proyecto **desde GitHub** con el `render.yaml` incluido. **Los tres microservicios usan el mismo PostgreSQL gestionado** (`lavanderia-postgres`, base `lavanderia`); no hace falta MySQL ni Railway.
 
-> **Limitación importante**: Render **no ofrece MySQL gestionado** en su plan gratuito. Para `auth-service` puedes usar un MySQL externo (PlanetScale, Aiven, Clever Cloud, Railway…) o adaptar el servicio a Postgres.
+Los servicios incluyen un conversor automático: si Render inyecta `postgresql://...`, se transforma a `jdbc:postgresql://...` al arrancar.
 
 ### 9.1 Pre-requisitos
 
-1. Sube este repo a GitHub.
-2. Crea cuenta en https://render.com y conéctala con tu GitHub.
-3. (Opcional pero recomendado para `auth-service`) crea una BD MySQL externa y guarda su `JDBC URL`, usuario y contraseña.
+1. Repo en GitHub.
+2. Cuenta en https://render.com vinculada a GitHub.
 
 ### 9.2 Pasos (Blueprint con render.yaml)
 
-1. En Render → **New** → **Blueprint** → selecciona el repo.
-2. Render leerá `render.yaml` y mostrará los servicios:
-   - `lavanderia-postgres` (DB)
-   - `lavanderia-auth-service`
-   - `lavanderia-laundry-service`
-   - `lavanderia-order-service`
-   - `lavanderia-frontend`
-3. Confirma. Render comenzará a construir cada servicio con su `Dockerfile`.
-4. Durante el primer deploy te pedirá completar las variables marcadas con `sync: false`. Configúralas así:
+1. Render → **New** → **Blueprint** → elige el repo.
+2. Render creará: `lavanderia-postgres`, `lavanderia-auth-service`, `lavanderia-laundry-service`, `lavanderia-order-service`, `lavanderia-frontend`.
+3. En el primer deploy, completa las variables `sync: false` con **el mismo** `JWT_SECRET` en los tres backends.
 
-#### lavanderia-auth-service
+#### Variables manuales (ejemplo; usa las URLs reales que te asigne Render)
 
-| Variable                       | Valor                                                              |
-|--------------------------------|---------------------------------------------------------------------|
-| `SPRING_DATASOURCE_URL`        | `jdbc:mysql://HOST:3306/DB?useSSL=true&serverTimezone=UTC`          |
-| `SPRING_DATASOURCE_USERNAME`   | usuario MySQL                                                       |
-| `SPRING_DATASOURCE_PASSWORD`   | contraseña MySQL                                                    |
-| `CORS_ALLOWED_ORIGINS`         | URL pública del frontend, ej: `https://lavanderia-frontend.onrender.com` |
-| `SEED_ADMIN_PASSWORD`          | (elige una contraseña fuerte)                                       |
-| `SEED_USER_PASSWORD`           | (elige una contraseña fuerte)                                       |
+| Servicio | Variables | Valor típico |
+|----------|-----------|--------------|
+| **auth, laundry, order** | `JWT_SECRET` | Un secreto largo, **idéntico** en los tres |
+| **auth, laundry, order** | `CORS_ALLOWED_ORIGINS` | `https://tu-frontend.onrender.com` (sin `/` final) |
+| **auth** | `SEED_ADMIN_PASSWORD`, `SEED_USER_PASSWORD` | Las que quieras para admin y user |
+| **order** | `LAUNDRY_SERVICE_URL` | `https://tu-laundry.onrender.com` |
+| **frontend** | `AUTH_API_URL`, `LAUNDRY_API_URL`, `ORDER_API_URL` | URLs `https://` de cada backend |
 
-`JWT_SECRET` se genera automáticamente con `generateValue: true`. **Copia su valor**: lo necesitas idéntico en los otros dos backends.
+Las `SPRING_DATASOURCE_*` de los tres backends se enlazan solas al Postgres vía `fromDatabase` en `render.yaml`.
 
-#### lavanderia-laundry-service
+4. **Manual Deploy** en cada servicio si hace falta tras guardar variables.
 
-| Variable               | Valor                                                                   |
-|------------------------|--------------------------------------------------------------------------|
-| `JWT_SECRET`           | el mismo que en auth-service                                            |
-| `CORS_ALLOWED_ORIGINS` | URL pública del frontend                                                |
+### 9.3 Puertos en Render
 
-(Las variables `SPRING_DATASOURCE_*` se conectan automáticamente al Postgres de Render.)
+Render define `PORT`; los `application.yml` ya usan `${PORT:...}`.
 
-#### lavanderia-order-service
+### 9.4 Base de datos
 
-| Variable               | Valor                                                                   |
-|------------------------|--------------------------------------------------------------------------|
-| `JWT_SECRET`           | el mismo que en auth-service                                            |
-| `LAUNDRY_SERVICE_URL`  | URL pública del laundry-service, ej: `https://lavanderia-laundry-service.onrender.com` |
-| `CORS_ALLOWED_ORIGINS` | URL pública del frontend                                                |
-
-#### lavanderia-frontend
-
-| Variable           | Valor                                                                          |
-|--------------------|---------------------------------------------------------------------------------|
-| `AUTH_API_URL`     | `https://lavanderia-auth-service.onrender.com`                                  |
-| `LAUNDRY_API_URL`  | `https://lavanderia-laundry-service.onrender.com`                               |
-| `ORDER_API_URL`    | `https://lavanderia-order-service.onrender.com`                                 |
-
-5. Tras configurar las variables, vuelve a desplegar (Manual Deploy → Deploy latest commit).
-
-### 9.3 Configuración de puertos en Render
-
-Render inyecta la variable `PORT` automáticamente. Nuestros `application.yml` ya leen `${PORT:NNNN}`, por lo que **no es necesario tocar nada**.
-
-### 9.4 Conectar las bases de datos
-
-- **PostgreSQL**: definido en `render.yaml` como `lavanderia-postgres`. Las variables `SPRING_DATASOURCE_URL/USERNAME/PASSWORD` de `laundry-service` y `order-service` se llenan automáticamente con `fromDatabase`.
-- **MySQL externo (auth-service)**:
-  - **PlanetScale**: crea una base, copia la URL JDBC y usa SSL.
-  - **Aiven**: 30 días gratis. Te da un host MySQL público con SSL.
-  - **Clever Cloud**: free tier permanente.
-  - Pega la `JDBC URL`, usuario y contraseña en las env vars del auth-service.
+Un solo **PostgreSQL** en Render; base `lavanderia`. Hibernate crea las tablas de auth, laundry y orders en la misma base (nombres de tabla distintos).
 
 ### 9.5 Cómo cambiar variables de entorno en Render
 
@@ -369,7 +330,7 @@ Render (ejemplos):
 | `Failed to connect to laundry-service` desde order-service | Revisa `LAUNDRY_SERVICE_URL` y que el laundry-service esté arriba. |
 | CORS error en el navegador | Pon la URL exacta del frontend en `CORS_ALLOWED_ORIGINS` de los 3 backends. |
 | Render: "Web service is sleeping" | El plan free duerme tras 15 min sin tráfico. Es normal, despierta con la primera request. |
-| `port 3306 already in use` | Tienes un MySQL local. El compose usa `3307` en host para evitarlo. |
+| Error de conexión a Postgres en Render | Prueba variable `RENDER_JDBC_SSLMODE` = `require` o `disable` en el servicio que falle. |
 
 ---
 

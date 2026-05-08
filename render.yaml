@@ -1,18 +1,5 @@
 # =================================================================
-# Infraestructura como código para Render (https://render.com)
-#
-# Este archivo declara:
-#  - 1 PostgreSQL gestionado por Render (usado por laundry-service y order-service)
-#  - 3 Web Services backend (Spring Boot) construidos con Docker
-#  - 1 Web Service frontend (Angular + nginx) construido con Docker
-#
-# IMPORTANTE para auth-service:
-#   Render no ofrece MySQL gestionado en su plan gratuito. Tienes 2 opciones:
-#     A) Usar un MySQL externo (PlanetScale, Aiven, Clever Cloud, etc.) y poner la
-#        URL JDBC en la variable SPRING_DATASOURCE_URL del auth-service.
-#     B) Adaptar auth-service a Postgres (cambia el driver y el dialect).
-#
-# Lee el README.md (sección Render) para ver el paso a paso.
+# Render: 1 PostgreSQL + 3 backends + frontend (todo sobre Postgres)
 # =================================================================
 
 databases:
@@ -23,7 +10,6 @@ databases:
     region: oregon
 
 services:
-  # ----------------------- AUTH SERVICE (MySQL externo) -----------------------
   - type: web
     name: lavanderia-auth-service
     runtime: docker
@@ -39,15 +25,20 @@ services:
         value: update
       - key: JWT_EXPIRATION_MS
         value: "86400000"
-      # Configura estos valores manualmente en el dashboard de Render
       - key: SPRING_DATASOURCE_URL
-        sync: false
+        fromDatabase:
+          name: lavanderia-postgres
+          property: connectionString
       - key: SPRING_DATASOURCE_USERNAME
-        sync: false
+        fromDatabase:
+          name: lavanderia-postgres
+          property: user
       - key: SPRING_DATASOURCE_PASSWORD
-        sync: false
+        fromDatabase:
+          name: lavanderia-postgres
+          property: password
       - key: JWT_SECRET
-        generateValue: true
+        sync: false
       - key: CORS_ALLOWED_ORIGINS
         sync: false
       - key: SEED_ADMIN_USERNAME
@@ -59,7 +50,6 @@ services:
       - key: SEED_USER_PASSWORD
         sync: false
 
-  # ----------------------- LAUNDRY SERVICE (Postgres Render) -----------------------
   - type: web
     name: lavanderia-laundry-service
     runtime: docker
@@ -85,13 +75,11 @@ services:
         fromDatabase:
           name: lavanderia-postgres
           property: password
-      # ¡Debe ser idéntico al JWT_SECRET del auth-service!
       - key: JWT_SECRET
         sync: false
       - key: CORS_ALLOWED_ORIGINS
         sync: false
 
-  # ----------------------- ORDER SERVICE (Postgres Render) -----------------------
   - type: web
     name: lavanderia-order-service
     runtime: docker
@@ -119,14 +107,11 @@ services:
           property: password
       - key: JWT_SECRET
         sync: false
-      # Configura manualmente con la URL completa, ej:
-      #   https://lavanderia-laundry-service.onrender.com
       - key: LAUNDRY_SERVICE_URL
         sync: false
       - key: CORS_ALLOWED_ORIGINS
         sync: false
 
-  # ----------------------- FRONTEND (Angular + nginx) -----------------------
   - type: web
     name: lavanderia-frontend
     runtime: docker
