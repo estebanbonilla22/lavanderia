@@ -33,7 +33,7 @@ public class RenderPostgresUrlEnvironmentPostProcessor implements EnvironmentPos
         if (!normalized.startsWith("postgresql://")) {
             return;
         }
-        String sslMode = environment.getProperty(PROP_SSL, "prefer");
+        String sslMode = environment.getProperty(PROP_SSL, "require");
         String jdbc = toJdbcUrl(normalized, sslMode);
         Map<String, Object> map = new HashMap<>();
         map.put(PROP_URL, jdbc);

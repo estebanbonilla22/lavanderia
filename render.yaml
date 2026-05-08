@@ -21,8 +21,11 @@ services:
     region: oregon
     healthCheckPath: /actuator/health
     envVars:
+      # Render espera que la app escuche en el puerto de esta variable (por defecto 10000 en Docker)
       - key: PORT
-        value: "8081"
+        value: "10000"
+      - key: RENDER_JDBC_SSLMODE
+        value: require
       - key: JPA_DDL_AUTO
         value: update
       - key: JWT_EXPIRATION_MS
@@ -62,7 +65,9 @@ services:
     healthCheckPath: /actuator/health
     envVars:
       - key: PORT
-        value: "8082"
+        value: "10000"
+      - key: RENDER_JDBC_SSLMODE
+        value: require
       - key: JPA_DDL_AUTO
         value: update
       - key: SPRING_DATASOURCE_URL
@@ -92,7 +97,9 @@ services:
     healthCheckPath: /actuator/health
     envVars:
       - key: PORT
-        value: "8083"
+        value: "10000"
+      - key: RENDER_JDBC_SSLMODE
+        value: require
       - key: JPA_DDL_AUTO
         value: update
       - key: SPRING_DATASOURCE_URL
